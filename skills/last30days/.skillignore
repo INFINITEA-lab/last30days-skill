@@ -5,7 +5,6 @@ agents/
 scripts/build-skill.sh
 scripts/compare.sh
 scripts/evaluate_search_quality.py
-scripts/test_device_auth.py
 scripts/test-v1-vs-v2.sh
 scripts/verify_v3.py
 

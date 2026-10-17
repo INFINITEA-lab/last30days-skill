@@ -170,3 +170,45 @@ def _no_ambient_agent_host(monkeypatch):
     ):
         monkeypatch.delenv(name, raising=False)
     yield
+
+
+# INFINITEA hardening: whole upstream test modules for removed features (browser-cookie
+# decryption, CDP/agentcookie, ScrapeCreators GitHub device sign-in). They stay in the
+# tree unmodified so upstream syncs never conflict on them; they are just not collected.
+collect_ignore = [
+    "test_agentcookie.py",
+    "test_box_chrome_login.py",
+    "test_browser_cookie_consent.py",
+    "test_chrome_cdp.py",
+    "test_chrome_cookies.py",
+    "test_chromium_browsers.py",
+    "test_cookie_extract.py",
+    "test_diagnose_browser_pending.py",
+    "test_env_cookies.py",
+    "test_github_device_auth.py",
+    "test_safari_cookies.py",
+    "test_setup_browser_persistence.py",
+    "test_x_extras_gating.py",
+]
+
+
+# --- INFINITEA hardening -------------------------------------------------------
+# Upstream tests that exercise features removed in the INFINITEA fork (browser
+# cookie decryption, ScrapeCreators GitHub device sign-in, auto brew/npx installs).
+# Listed by node id so an upstream sync surfaces any NEW test that touches them.
+import pathlib as _infinitea_pathlib
+
+import pytest as _infinitea_pytest
+
+_INFINITEA_LIST = _infinitea_pathlib.Path(__file__).parent / "infinitea_removed_feature_tests.txt"
+_INFINITEA_REMOVED = set(
+    line.strip()
+    for line in (_INFINITEA_LIST.read_text().splitlines() if _INFINITEA_LIST.exists() else [])
+    if line.strip() and not line.startswith("#")
+)
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        if item.nodeid in _INFINITEA_REMOVED:
+            item.add_marker(_infinitea_pytest.mark.skip(reason="feature removed by INFINITEA hardening"))

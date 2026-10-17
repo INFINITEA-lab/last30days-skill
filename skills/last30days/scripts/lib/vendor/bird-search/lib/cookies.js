@@ -7,7 +7,10 @@ const TWITTER_URL = 'https://x.com/';
 const TWITTER_ORIGINS = ['https://x.com/', 'https://twitter.com/'];
 const DEFAULT_COOKIE_TIMEOUT_MS = 30_000;
 async function loadSweetCookie() {
-    return import('@steipete/sweet-cookie');
+    // INFINITEA hardening: browser cookie reads removed; env AUTH_TOKEN/CT0 only.
+    const err = new Error('Cannot find package @steipete/sweet-cookie (removed by INFINITEA hardening)');
+    err.code = 'ERR_MODULE_NOT_FOUND';
+    throw err;
 }
 function normalizeValue(value) {
     if (typeof value !== 'string') {
@@ -140,8 +143,7 @@ export async function extractCookiesFromFirefox(profile) {
 export async function resolveCredentials(options) {
     const warnings = [];
     const cookies = buildEmpty();
-    const disableBrowserCookies = envFlagEnabled('BIRD_DISABLE_BROWSER_COOKIES') ||
-        envFlagEnabled('LAST30DAYS_DISABLE_BROWSER_COOKIES');
+    const disableBrowserCookies = true; // INFINITEA hardening: always disabled
     const cookieTimeoutMs = typeof options.cookieTimeoutMs === 'number' &&
         Number.isFinite(options.cookieTimeoutMs) &&
         options.cookieTimeoutMs > 0
