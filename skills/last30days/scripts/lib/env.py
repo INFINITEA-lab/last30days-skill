@@ -962,18 +962,7 @@ def x_extras_enabled(config: dict[str, Any]) -> bool:
     inferred from the home directory, PATH, or ``HERMES_AGENT``/``OPENCLAW_CLI``
     env: only the signals above.
     """
-    import platform
-    raw = (config.get("AGENTCOOKIE") or read_secret_env("AGENTCOOKIE") or "").strip().lower()
-    if raw == "on":
-        return True
-    system = platform.system()
-    if system == "Linux":
-        return True
-    if system == "Darwin":
-        if _is_mac_mini():
-            return True
-        from . import agentcookie
-        return agentcookie.role_is_sink(config)
+    # INFINITEA hardening: browser-cookie / CDP / agentcookie discovery removed.
     return False
 
 
@@ -1024,43 +1013,8 @@ def _discover_and_apply_x_credentials(config: dict[str, Any]) -> None:
     this returns before ANY leg, for every cookie domain, unless the pin is
     ``bird`` (the one path that re-enables discovery for that run).
     """
-    if not x_policy(config).cookie_discovery:
-        return
-
-    from . import agentcookie, chrome_cdp
-
-    def have_pair() -> bool:
-        return bool(config.get("AUTH_TOKEN") and config.get("CT0"))
-
-    extras = x_extras_enabled(config)
-
-    # (2) agentcookie sidecar — extras only, complete pair only.
-    if extras and not have_pair():
-        pair = agentcookie.read_x_cookies(config)
-        if pair:
-            _apply_x_pair(config, pair["auth_token"], pair["ct0"], "agentcookie")
-
-    # Mac mini + browser opted in: native extract before CDP (R19).
-    mini_extract_first = (
-        extras and _is_mac_mini() and bool(cookie_extraction_browsers(config))
-    )
-    if mini_extract_first and not have_pair():
-        _apply_browser_extract(config)
-
-    # (3) live Chrome CDP — extras only, after browser-cookie consent.
-    if extras and not have_pair() and chrome_cdp.cookie_access_allowed(config):
-        pair = chrome_cdp.read_x_cookies(config)
-        if pair:
-            _apply_x_pair(config, pair["auth_token"], pair["ct0"], "chrome cdp")
-
-    # (4) mainline browser extract (unless already run above for the mini case).
-    if not mini_extract_first:
-        _apply_browser_extract(config)
-
-
-# ---------------------------------------------------------------------------
-# Browser cookie extraction
-# ---------------------------------------------------------------------------
+    # INFINITEA hardening: browser-cookie / CDP / agentcookie discovery removed.
+    return None
 
 COOKIE_DOMAINS: dict[str, dict[str, Any]] = {
     "x": {
@@ -1103,46 +1057,8 @@ def cookie_extraction_browsers(config: dict[str, Any]) -> list[str]:
     unrequested Keychain prompt. On an official-only host (``x_policy``) the
     list is empty regardless of ``FROM_BROWSER`` unless ``bird`` is pinned.
     """
-    if not x_policy(config).cookie_discovery:
-        return []
-    consent = config.get("BROWSER_CONSENT")
-    if consent is not None and str(consent).strip().lower() not in {"1", "true", "yes", "on"}:
-        return []
-    silent_browsers = list(COOKIE_BROWSER_NAMES[:2])
-    chromium_browsers = list(COOKIE_BROWSER_NAMES[2:])
-    known_browsers = list(COOKIE_BROWSER_NAMES)
-    from_browser = (config.get("FROM_BROWSER") or "").strip().lower()
-    if not from_browser:
-        return []
-    if from_browser == "off":
-        return []
-    if from_browser == "auto":
-        return silent_browsers + chromium_browsers
-    if "," in from_browser:
-        requested = [b.strip() for b in from_browser.split(",") if b.strip()]
-        resolved = [b for b in requested if b in known_browsers]
-        unknown = [b for b in requested if b not in known_browsers]
-        if unknown:
-            sys.stderr.write(
-                "[last30days] WARNING: FROM_BROWSER ignored unrecognized browser(s): "
-                f"{', '.join(unknown)} (known: {', '.join(known_browsers)})\n"
-            )
-            sys.stderr.flush()
-        return resolved
-    if from_browser in known_browsers:
-        return [from_browser]
-    # Non-empty, not off/auto, not a known browser, not a list: unrecognized.
-    # Warn rather than fail silently so a typo (FROM_BROWSER=chrme) is visible
-    # instead of looking like "no cookies found".
-    sys.stderr.write(
-        f"[last30days] WARNING: FROM_BROWSER='{from_browser}' is not a recognized "
-        f"browser; no cookies will be read (known: {', '.join(known_browsers)}, "
-        "or 'auto'/'off')\n"
-    )
-    sys.stderr.flush()
+    # INFINITEA hardening: browser-cookie / CDP / agentcookie discovery removed.
     return []
-
-
 
 def extract_browser_credentials(config: dict[str, Any]) -> dict[str, str]:
     """Extract auth cookies from local browsers.
@@ -1151,66 +1067,9 @@ def extract_browser_credentials(config: dict[str, Any]) -> dict[str, str]:
     ``cookie_extraction_browsers``; this function just runs the extraction for
     each configured cookie domain.
     """
-    browsers = cookie_extraction_browsers(config)
-    if not browsers:
-        return {}
-    try:
-        from . import cookie_extract
-    except ImportError:
-        return {}
-    extracted: dict[str, str] = {}
-    for _service, spec in COOKIE_DOMAINS.items():
-        missing_cookies = [
-            name for name in spec["cookies"] if not config.get(spec["mapping"][name])
-        ]
-        if not missing_cookies:
-            continue
-        # Cookies from different browsers can belong to different sessions,
-        # so values are never combined across browsers: a complete set from
-        # one browser wins, else the first browser's partial set is kept.
-        chosen: dict[str, str] | None = None
-        fallback: dict[str, str] | None = None
-        denied_browsers: list[str] = []
-        for browser in browsers:
-            try:
-                cookies = cookie_extract.extract_cookies(browser, spec["domain"], spec["cookies"])
-            except PermissionError:
-                denied_browsers.append(browser)
-                if len(missing_cookies) == len(spec["cookies"]):
-                    continue
-                # Keep full-pair profile preference unless a denied profile blocks it.
-                try:
-                    cookies = cookie_extract.extract_cookies(
-                        browser, spec["domain"], missing_cookies
-                    )
-                except Exception:
-                    continue
-            except Exception:
-                continue
-            if not cookies:
-                continue
-            if cookie_extract.has_complete_pair(cookies, spec["cookies"]):
-                chosen = cookies
-                break
-            if fallback is None:
-                fallback = cookies
-        if chosen is None:
-            chosen = fallback or {}
-        if _service == "x" and denied_browsers and not cookie_extract.has_complete_pair(
-            chosen, spec["cookies"]
-        ):
-            sys.stderr.write(
-                "[last30days] X browser cookie access permission denied in "
-                f"{', '.join(denied_browsers)}. {X_COOKIE_ACCESS_FIX}\n"
-            )
-        for cookie_name, env_key in spec["mapping"].items():
-            if chosen.get(cookie_name) and not config.get(env_key):
-                extracted[env_key] = chosen[cookie_name]
-    return extracted
+    # INFINITEA hardening: browser-cookie / CDP / agentcookie discovery removed.
+    return {}
 
-
-# Auth-origin label per X backend for ``get_x_source_with_method`` (bird's
-# label is the cookie source recorded in ``_AUTH_TOKEN_SOURCE``).
 _X_METHOD_LABELS = {
     "xai": "xai",
     "xurl": "oauth2",  # xurl CLI (official X API v2, OAuth2, free developer app)
@@ -1596,10 +1455,6 @@ def x_pending_browser_auth(config: dict[str, Any], local_only: bool = False) -> 
     # The agentcookie sidecar is a run-time cookie source ONLY on extra hosts
     # (Linux / Mac mini / Darwin sink / AGENTCOOKIE=on). Gating this keeps a
     # plain MacBook from predicting bird off a stray agentcookie binary (R18).
-    if x_extras_enabled(config):
-        from . import agentcookie
-        if agentcookie.is_available(config):
-            return True
     return False
 
 

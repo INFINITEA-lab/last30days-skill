@@ -107,41 +107,11 @@ def run_auto_setup(config: Dict[str, Any], *, allow_browser_cookies: bool = Fals
     # recorded as not attempted, with a neutral note the caller can relay.
     # The free CLI installs below still run. A LAST30DAYS_X_BACKEND=bird pin
     # is the one path that re-enables discovery, via x_policy.
+    # INFINITEA hardening: browser-cookie scan is never performed.
+    allow_browser_cookies = False
     if allow_browser_cookies and not x_policy(config).cookie_discovery:
         allow_browser_cookies = False
         cookie_note = OFFICIAL_HOST_COOKIE_NOTE
-
-    if allow_browser_cookies:
-        from . import cookie_extract
-
-        cookie_config = dict(config)
-        cookie_config["BROWSER_CONSENT"] = "true"
-        if not (cookie_config.get("FROM_BROWSER") or "").strip():
-            # Chromium-first avoids Safari's usual Full Disk Access prompt.
-            # Browser-data permissions can still deny Chromium DB reads before
-            # the Keychain step, so a failed scan must report that separately.
-            # firefox/safari stay as the silent fallbacks. Note: an explicit
-            # comma list preserves this order (cookie_extraction_browsers);
-            # "auto" would put the silent browsers first, so do not use it here.
-            cookie_config["FROM_BROWSER"] = "chrome,brave,edge,vivaldi,opera,arc,chromium,firefox,safari"
-        browsers = cookie_extraction_browsers(cookie_config)
-
-        for source_name, spec in COOKIE_DOMAINS.items():
-            domain = spec["domain"]
-            cookie_names = spec["cookies"]
-
-            for browser in browsers:
-                try:
-                    result = cookie_extract.extract_cookies_with_source(browser, domain, cookie_names)
-                except PermissionError:
-                    access_denied.setdefault(source_name, set()).add(browser)
-                    continue
-                except Exception as exc:
-                    logger.debug("Cookie extraction failed for %s via %s: %s", source_name, browser, exc)
-                    continue
-                if result is not None and cookie_extract.has_complete_pair(result[0], cookie_names):
-                    cookies_found[source_name] = result[1]
-                    break  # Complete pair found for this service, stop trying browsers
 
     # Check yt-dlp availability and install via Homebrew if missing. Windows
     # has no Homebrew, and its working install path is `pip install yt-dlp`
@@ -154,26 +124,7 @@ def run_auto_setup(config: Dict[str, Any], *, allow_browser_cookies: bool = Fals
     elif os.name == "nt":
         ytdlp_installed = False
         ytdlp_action = "no_pip_windows"
-    elif shutil.which("brew") is not None:
-        brew_stderr = ""
-        try:
-            proc = subprocess.run(
-                ["brew", "install", "yt-dlp"],
-                capture_output=True, text=True, timeout=120,
-            )
-            if proc.returncode == 0:
-                ytdlp_installed = True
-                ytdlp_action = "installed"
-            else:
-                ytdlp_installed = False
-                ytdlp_action = "install_failed"
-                brew_stderr = proc.stderr
-                logger.warning("brew install yt-dlp failed: %s", proc.stderr)
-        except Exception as exc:
-            ytdlp_installed = False
-            ytdlp_action = "install_failed"
-            brew_stderr = str(exc)
-            logger.warning("brew install yt-dlp exception: %s", exc)
+    # INFINITEA hardening: no automatic `brew install`; print guidance only.
     else:
         ytdlp_installed = False
         ytdlp_action = "no_homebrew"
@@ -299,9 +250,10 @@ def _run_npx_install(slug: str) -> Tuple[str, str]:
     ``rc=0`` (in which case ``stderr`` carries any non-fatal stderr output for
     the caller's own off-path logging).
     """
-    npx = shutil.which("npx")
-    if npx is None:
-        return "no_npx", ""
+    # INFINITEA hardening: never auto-run `npx -y` installs from the wizard.
+    # Report "no_npx" so callers print the manual install command instead.
+    return "no_npx", ""
+    npx = shutil.which("npx")  # pragma: no cover - unreachable upstream path
     try:
         proc = subprocess.run(
             [npx, "-y", PRINTING_PRESS_NPM, "install", slug, "--cli-only"],
@@ -979,7 +931,7 @@ def run_openclaw_setup(config: Dict[str, Any]) -> Dict[str, Any]:
 # Device auth flow (GitHub OAuth via ScrapeCreators)
 # ---------------------------------------------------------------------------
 
-_DEVICE_BASE = "https://api.scrapecreators.com/v1/github/device"
+_DEVICE_BASE = ""  # INFINITEA hardening: third-party GitHub device flow disabled
 
 # A GitHub device code is always XXXX-XXXX (uppercase alphanumerics). We validate
 # user_code against this before copying, labeling, or emitting it so a malformed
@@ -1024,6 +976,8 @@ def run_device_auth() -> Optional[Tuple[str, str, str, int]]:
         (device_code, user_code, verification_uri, interval) on success,
         None on failure.
     """
+    if not _DEVICE_BASE:
+        return None  # INFINITEA hardening
     try:
         body = json.dumps({}).encode()
         req = Request(f"{_DEVICE_BASE}/code", data=body, method="POST")
@@ -1280,9 +1234,10 @@ def _start_device_flow() -> "Tuple[Dict[str, Any], Optional[Dict[str, Any]]]":
             None,
         )
 
-    result = run_device_auth()
-    if result is None:
-        return ({"status": "error", "message": "Failed to start device auth flow"}, None)
+    # INFINITEA hardening: the GitHub device flow proxied via api.scrapecreators.com
+    # is disabled. Paste a SCRAPECREATORS_API_KEY into the config manually if needed.
+    return ({"status": "error", "message": "GitHub device sign-in is disabled in the INFINITEA fork; set SCRAPECREATORS_API_KEY manually if needed."}, None)
+    result = run_device_auth()  # pragma: no cover - unreachable
 
     device_code, user_code, verification_uri, interval = result
 
